@@ -2,6 +2,10 @@
 
 
 ### test 
+
+- see run.sh 
+
+
 ```sh 
 db.gwas_library.findOne()
 ```
