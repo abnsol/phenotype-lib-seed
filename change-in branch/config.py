@@ -1,0 +1,100 @@
+import os
+import argparse
+from llm import LLM
+from query_swipl import PrologQuery
+from db import (
+    UserHandler, ProjectHandler, FileHandler, AnalysisHandler,
+    EnrichmentHandler, HypothesisHandler, SummaryHandler, TaskHandler,
+    GeneExpressionHandler, GWASLibraryHandler
+)
+from storage import create_minio_client_from_env
+
+class Config:
+    """Centralized configuration for the application"""
+    
+    def __init__(self):
+        self.ensembl_hgnc_map = None
+        self.hgnc_ensembl_map = None
+        self.go_map = None
+        self.swipl_host = "localhost"
+        self.swipl_port = 4242
+        self.mongodb_uri = None
+        self.db_name = None
+        self.embedding_model = "w601sxs/b1ade-embed-kd"
+        self.plink_dir = "./data/1000Genomes_phase3/plink_format_b38"
+        self.data_dir = "./data"
+        self.ontology_cache_dir = "./data/ontology"
+        self.host = "0.0.0.0"
+        self.port = 5000
+        # New Field
+        self.gwas_manifest_path = "./data/Manifest_201807.csv" 
+        
+        # Harmonization workflow configuration
+        self.harmonizer_ref_dir = "./data/harmonizer_ref/b38"
+        self.harmonizer_code_repo = "./gwas-sumstats-harmoniser"
+        self.harmonizer_script_dir = "./scripts/1000Genomes_phase3"
+
+    @classmethod
+    def from_args(cls, args):
+        """Create config from command line arguments"""
+        config = cls()
+        config.ensembl_hgnc_map = args.ensembl_hgnc_map
+        config.hgnc_ensembl_map = args.hgnc_ensembl_map
+        config.go_map = args.go_map
+        config.swipl_host = args.swipl_host
+        config.swipl_port = args.swipl_port
+        config.embedding_model = getattr(args, 'embedding_model', config.embedding_model)
+        config.host = getattr(args, 'host', config.host)
+        config.port = getattr(args, 'port', config.port)
+        # Capture manifest path from args
+        config.gwas_manifest_path = getattr(args, 'gwas_manifest', config.gwas_manifest_path)
+        
+        config.mongodb_uri = os.getenv("MONGODB_URI")
+        config.db_name = os.getenv("DB_NAME")
+        return config
+
+    @classmethod
+    def from_env(cls):
+        """Create config from environment variables"""
+        config = cls()
+        config.ensembl_hgnc_map = os.getenv("ENSEMBL_HGNC_MAP")
+        config.hgnc_ensembl_map = os.getenv("HGNC_ENSEMBL_MAP")
+        config.go_map = os.getenv("GO_MAP")
+        config.swipl_host = os.getenv("SWIPL_HOST", "localhost")
+        config.swipl_port = int(os.getenv("SWIPL_PORT", "4242"))
+        config.mongodb_uri = os.getenv("MONGODB_URI")
+        config.db_name = os.getenv("DB_NAME")
+        config.embedding_model = os.getenv("EMBEDDING_MODEL", "w601sxs/b1ade-embed-kd")
+        config.gwas_manifest_path = os.getenv("GWAS_MANIFEST_PATH", "./data/Manifest_201807.csv")
+        # ... rest of env vars ...
+        return config
+
+def create_dependencies(config):
+    # (Existing factory function remains the same)
+    # This will be called in main.py to get the 'gwas_library' handler
+    from enrich import Enrich
+    enrichr = Enrich(config.ensembl_hgnc_map, config.hgnc_ensembl_map, config.go_map)
+    llm = LLM()
+    prolog_query = PrologQuery(host=config.swipl_host, port=config.swipl_port)
+    mongodb_uri = config.mongodb_uri 
+    db_name = config.db_name
+    if not mongodb_uri or not db_name:
+        raise ValueError("Missing MongoDB config")
+    minio_storage = create_minio_client_from_env()
+    
+    return {
+        'enrichr': enrichr,
+        'llm': llm,
+        'prolog_query': prolog_query,
+        'users': UserHandler(mongodb_uri, db_name),
+        'projects': ProjectHandler(mongodb_uri, db_name),
+        'files': FileHandler(mongodb_uri, db_name),
+        'analysis': AnalysisHandler(mongodb_uri, db_name),
+        'enrichment': EnrichmentHandler(mongodb_uri, db_name),
+        'hypotheses': HypothesisHandler(mongodb_uri, db_name),
+        'summaries': SummaryHandler(mongodb_uri, db_name),
+        'tasks': TaskHandler(mongodb_uri, db_name),
+        'gene_expression': GeneExpressionHandler(mongodb_uri, db_name),
+        'gwas_library': GWASLibraryHandler(mongodb_uri, db_name),
+        'storage': minio_storage
+    }
